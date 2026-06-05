@@ -192,20 +192,32 @@ class OmieAPI:
                        c.get("numero_documento_fiscal", "").lstrip("0") == str(numero_nf).lstrip("0")]
         return {"boletos": encontradas, "total": len(encontradas)}
 
+    def _listar_todos_produtos(self) -> list:
+        """Busca todos os produtos paginando."""
+        todos = []
+        pagina = 1
+        while True:
+            r = self._call("produtos/produto", "ListarProdutos", {
+                "pagina": pagina, "registros_por_pagina": 500, "apenas_importado_api": "N",
+            })
+            lote = r.get("produto_servico_cadastro", [])
+            todos.extend(lote)
+            if pagina >= r.get("total_de_paginas", 1):
+                break
+            pagina += 1
+        return todos
+
     def buscar_produtos(self, nome: str = "", codigo: str = ""):
-        """Busca produtos cadastrados no OMIE."""
-        r = self._call("produtos/produto", "ListarProdutos", {
-            "pagina": 1, "registros_por_pagina": 100, "apenas_importado_api": "N",
-        })
-        produtos = r.get("produto_servico_cadastro", [])
+        """Busca produtos cadastrados no OMIE por nome ou código."""
+        todos = self._listar_todos_produtos()
         resultado = []
-        for p in produtos:
+        for p in todos:
             desc = p.get("descricao", "")
             cod = p.get("codigo", "")
-            if nome and nome.lower() not in desc.lower() and nome.lower() not in cod.lower():
-                continue
-            if codigo and codigo.lower() not in cod.lower():
-                continue
+            termo = nome or codigo
+            if termo:
+                if termo.lower() not in desc.lower() and termo.lower() not in cod.lower():
+                    continue
             resultado.append({
                 "codigo_produto": p.get("codigo_produto", 0),
                 "codigo": cod,
@@ -260,24 +272,13 @@ class OmieAPI:
 
     def consultar_estoque(self, nome_produto: str = "", codigo_produto: str = ""):
         """Busca produtos e retorna estoque atual."""
-        filtro = {}
-        if nome_produto:
-            filtro["descricao"] = nome_produto
-        if codigo_produto:
-            filtro["codigo"] = codigo_produto
-
-        r = self._call("produtos/produto", "ListarProdutos", {
-            "pagina": 1, "registros_por_pagina": 50, "apenas_importado_api": "N",
-            "filtrarPorCodigo": filtro if filtro else {}
-        })
-
-        produtos = r.get("produto_servico_cadastro", [])
+        termo = nome_produto or codigo_produto
+        todos = self._listar_todos_produtos()
         resultado = []
-        for p in produtos:
+        for p in todos:
             desc = p.get("descricao", "")
             cod = p.get("codigo", "")
-            # Filtra por nome se informado (OMIE não faz busca por texto parcial bem)
-            if nome_produto and nome_produto.lower() not in desc.lower():
+            if termo and termo.lower() not in desc.lower() and termo.lower() not in cod.lower():
                 continue
             resultado.append({
                 "codigo": cod,
