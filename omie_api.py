@@ -192,6 +192,37 @@ class OmieAPI:
                        c.get("numero_documento_fiscal", "").lstrip("0") == str(numero_nf).lstrip("0")]
         return {"boletos": encontradas, "total": len(encontradas)}
 
+    def consultar_estoque(self, nome_produto: str = "", codigo_produto: str = ""):
+        """Busca produtos e retorna estoque atual."""
+        filtro = {}
+        if nome_produto:
+            filtro["descricao"] = nome_produto
+        if codigo_produto:
+            filtro["codigo"] = codigo_produto
+
+        r = self._call("produtos/produto", "ListarProdutos", {
+            "pagina": 1, "registros_por_pagina": 50, "apenas_importado_api": "N",
+            "filtrarPorCodigo": filtro if filtro else {}
+        })
+
+        produtos = r.get("produto_servico_cadastro", [])
+        resultado = []
+        for p in produtos:
+            desc = p.get("descricao", "")
+            cod = p.get("codigo", "")
+            # Filtra por nome se informado (OMIE não faz busca por texto parcial bem)
+            if nome_produto and nome_produto.lower() not in desc.lower():
+                continue
+            resultado.append({
+                "codigo": cod,
+                "descricao": desc,
+                "unidade": p.get("unidade", ""),
+                "estoque_atual": p.get("quantidade_estoque", 0),
+                "estoque_minimo": p.get("estoque_minimo", 0),
+                "_empresa": self.empresa,
+            })
+        return {"produtos": resultado, "total": len(resultado)}
+
     def consultar_cliente(self, nome_cliente: str):
         return self._call("geral/clientes", "ListarClientes", {
             "pagina": 1, "registros_por_pagina": 10, "apenas_importado_api": "N",
@@ -304,6 +335,13 @@ def consolidar_pedidos(dias=30):
         r = OmieAPI(emp).listar_pedidos_venda(dias)
         todos.extend(r.get("pedido_venda_produto", []))
     return {"pedido_venda_produto": todos, "total_de_registros": len(todos)}
+
+def consolidar_estoque(nome_produto="", codigo_produto=""):
+    todos = []
+    for emp in EMPRESAS:
+        r = OmieAPI(emp).consultar_estoque(nome_produto, codigo_produto)
+        todos.extend(r.get("produtos", []))
+    return {"produtos": todos, "total": len(todos)}
 
 def consolidar_resumo():
     result = {}

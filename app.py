@@ -7,7 +7,7 @@ from datetime import datetime, date, timedelta
 from omie_api import (
     EMPRESAS, get_api,
     consolidar_contas_receber, consolidar_contas_pagar,
-    consolidar_pedidos, consolidar_resumo,
+    consolidar_pedidos, consolidar_resumo, consolidar_estoque,
 )
 from pdf_utils import gerar_boleto_pdf, gerar_relatorio_pdf
 
@@ -80,6 +80,17 @@ TOOLS = [
         "name": "resumo_financeiro",
         "description": "Resumo geral financeiro: contas a receber, atrasadas e a pagar.",
         "input_schema": {"type": "object", "properties": {}}
+    },
+    {
+        "name": "consultar_estoque",
+        "description": "Consulta estoque de produtos. Use para responder perguntas como 'qual o estoque do produto X', 'tem em estoque', 'quantidade disponível de X'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "nome_produto": {"type": "string", "description": "Nome ou parte do nome do produto a buscar"},
+                "codigo_produto": {"type": "string", "description": "Código do produto no OMIE (opcional)"}
+            }
+        }
     }
 ]
 
@@ -93,6 +104,7 @@ def executar_tool(name, inputs, api, consolidado):
             "buscar_boleto_por_nf": lambda: {"erro": "Selecione uma empresa específica para boletos"},
             "consultar_cliente": lambda: api.consultar_cliente(**inputs),
             "resumo_financeiro": lambda: consolidar_resumo(),
+            "consultar_estoque": lambda: consolidar_estoque(**inputs),
         }
     else:
         fns = {
@@ -103,6 +115,7 @@ def executar_tool(name, inputs, api, consolidado):
             "buscar_boleto_por_nf": lambda: api.buscar_boleto_por_nf(**inputs),
             "consultar_cliente": lambda: api.consultar_cliente(**inputs),
             "resumo_financeiro": lambda: api.resumo_financeiro(),
+            "consultar_estoque": lambda: api.consultar_estoque(**inputs),
         }
     return fns[name]() if name in fns else {"erro": "Ferramenta não encontrada"}
 
