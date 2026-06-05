@@ -1,0 +1,14 @@
+# Caches locais (dados sensíveis)
+clientes_*.json
+categorias_*.json
+clientes_cache.json
+categorias_cache.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Mac
+.DS_Store

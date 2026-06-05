@@ -1,0 +1,5 @@
+streamlit
+anthropic
+requests
+fpdf2
+pymupdf
