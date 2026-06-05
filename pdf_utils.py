@@ -64,6 +64,120 @@ def gerar_boleto_pdf(conta: dict) -> bytes:
     return pdf.output()
 
 
+def gerar_proposta_pdf(empresa: str, cliente_nome: str, itens: list,
+                        condicao_pagamento: str = "", observacao: str = "",
+                        numero_pedido: str = "") -> bytes:
+    """Gera PDF de proposta comercial estilo IDDEA."""
+    BROWN = (61, 41, 30)
+    TAUPE = (196, 184, 176)
+    CREAM = (245, 240, 236)
+
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_margins(15, 15, 15)
+
+    # ── Cabeçalho ────────────────────────────────────────────────────────────
+    pdf.set_fill_color(*TAUPE)
+    pdf.rect(0, 0, 210, 30, "F")
+    pdf.set_text_color(*BROWN)
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.set_xy(15, 7)
+    pdf.cell(90, 10, empresa.upper(), ln=False)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.set_xy(110, 8)
+    pdf.cell(0, 5, "PROPOSTA COMERCIAL", ln=True)
+    if numero_pedido:
+        pdf.set_xy(110, 14)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.cell(0, 5, f"Pedido OMIE: {numero_pedido}")
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(20)
+
+    # ── Info cliente ──────────────────────────────────────────────────────────
+    pdf.set_fill_color(*CREAM)
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(30, 7, "Cliente:", fill=True, border=0)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 7, cliente_nome, ln=True, fill=True)
+
+    pdf.set_font("Helvetica", "B", 9)
+    pdf.cell(30, 7, "Data:", fill=True, border=0)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 7, datetime.today().strftime("%d/%m/%Y"), ln=True, fill=True)
+
+    if condicao_pagamento:
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(30, 7, "Pagamento:", fill=True, border=0)
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 7, condicao_pagamento, ln=True, fill=True)
+
+    pdf.ln(6)
+
+    # ── Tabela de itens ───────────────────────────────────────────────────────
+    # Header
+    pdf.set_fill_color(*BROWN)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.cell(10, 7, "#", border=0, fill=True, align="C")
+    pdf.cell(85, 7, "PRODUTO", border=0, fill=True)
+    pdf.cell(15, 7, "UN", border=0, fill=True, align="C")
+    pdf.cell(20, 7, "QTD", border=0, fill=True, align="R")
+    pdf.cell(25, 7, "VL UNIT (R$)", border=0, fill=True, align="R")
+    pdf.cell(15, 7, "DESC%", border=0, fill=True, align="R")
+    pdf.cell(25, 7, "TOTAL (R$)", border=0, fill=True, align="R")
+    pdf.ln()
+
+    # Itens
+    pdf.set_text_color(0, 0, 0)
+    total_geral = 0
+    for i, item in enumerate(itens, 1):
+        fill_color = CREAM if i % 2 == 0 else (255, 255, 255)
+        pdf.set_fill_color(*fill_color)
+        pdf.set_font("Helvetica", "", 8)
+
+        qty = item.get("quantidade", 0)
+        vunit = item.get("valor_unitario", 0)
+        desc_pct = item.get("desconto", 0)
+        total_item = qty * vunit * (1 - desc_pct / 100)
+        total_geral += total_item
+
+        def fmt(v): return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        pdf.cell(10, 6, str(i), fill=True, align="C")
+        pdf.cell(85, 6, item.get("descricao", "")[:45], fill=True)
+        pdf.cell(15, 6, item.get("unidade", "UN"), fill=True, align="C")
+        pdf.cell(20, 6, fmt(qty), fill=True, align="R")
+        pdf.cell(25, 6, fmt(vunit), fill=True, align="R")
+        pdf.cell(15, 6, f"{desc_pct:.1f}%", fill=True, align="R")
+        pdf.cell(25, 6, fmt(total_item), fill=True, align="R")
+        pdf.ln()
+
+    # Total
+    pdf.ln(2)
+    pdf.set_fill_color(*TAUPE)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(155, 8, "TOTAL GERAL", fill=True, align="R")
+    pdf.cell(25, 8, f"R$ {fmt(total_geral)}", fill=True, align="R")
+    pdf.ln()
+
+    # Observação
+    if observacao:
+        pdf.ln(6)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(0, 6, "Observações:", ln=True)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.multi_cell(0, 5, observacao)
+
+    # Rodapé
+    pdf.ln(8)
+    pdf.set_font("Helvetica", "I", 7)
+    pdf.set_text_color(150, 150, 150)
+    pdf.cell(0, 5, f"Documento gerado em {datetime.today().strftime('%d/%m/%Y %H:%M')} — {empresa}", align="C")
+
+    return pdf.output()
+
+
 def gerar_relatorio_pdf(titulo: str, linhas: list[dict], colunas: list[str]) -> bytes:
     pdf = FPDF()
     pdf.add_page("L")  # landscape para tabelas largas

@@ -9,7 +9,7 @@ from omie_api import (
     consolidar_contas_receber, consolidar_contas_pagar,
     consolidar_pedidos, consolidar_resumo, consolidar_estoque,
 )
-from pdf_utils import gerar_boleto_pdf, gerar_relatorio_pdf
+from pdf_utils import gerar_boleto_pdf, gerar_relatorio_pdf, gerar_proposta_pdf
 
 import os
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -654,6 +654,176 @@ def pagina_chat(api, consolidado=False, empresa_sel=""):
                 st.session_state.messages.append({"role": "assistant", "content": resposta, "acoes": acoes})
 
 
+# ── PÁGINA: PROPOSTA COMERCIAL ───────────────────────────────────────────────
+
+def pagina_proposta(api):
+    st.header("📋 Proposta Comercial")
+    st.caption("Crie um orçamento/proposta e gere pedido no OMIE.")
+
+    # ── 1. Cliente ────────────────────────────────────────────────────────────
+    st.subheader("1. Cliente")
+    col_c, col_cb = st.columns([4, 1])
+    with col_c:
+        busca_cli = st.text_input("Buscar cliente pelo nome", key="prop_busca_cli")
+    with col_cb:
+        st.write("")
+        st.write("")
+        if st.button("Buscar", key="prop_btn_cli"):
+            with st.spinner("Buscando..."):
+                r = api.consultar_cliente(busca_cli)
+                st.session_state["prop_clientes"] = r.get("clientes_cadastro", [])
+
+    clientes = st.session_state.get("prop_clientes", [])
+    cliente_sel = st.session_state.get("prop_cliente_sel", None)
+    if clientes:
+        opcoes_cli = {f"{c.get('razao_social','')} ({c.get('nome_fantasia','')})": c for c in clientes}
+        escolha_cli = st.selectbox("Selecione o cliente:", list(opcoes_cli.keys()), key="prop_sel_cli")
+        cliente_sel = opcoes_cli[escolha_cli]
+        st.session_state["prop_cliente_sel"] = cliente_sel
+    if cliente_sel:
+        st.success(f"✅ {cliente_sel.get('razao_social','')} — código {cliente_sel.get('codigo_cliente_omie','')}")
+
+    st.divider()
+
+    # ── 2. Produtos ───────────────────────────────────────────────────────────
+    st.subheader("2. Produtos")
+    col_p, col_pb = st.columns([4, 1])
+    with col_p:
+        busca_prod = st.text_input("Buscar produto pelo nome ou código", key="prop_busca_prod")
+    with col_pb:
+        st.write("")
+        st.write("")
+        if st.button("Buscar", key="prop_btn_prod"):
+            with st.spinner("Buscando..."):
+                st.session_state["prop_produtos_encontrados"] = api.buscar_produtos(busca_prod)
+
+    prods_encontrados = st.session_state.get("prop_produtos_encontrados", [])
+    if prods_encontrados:
+        opcoes_prod = {f"{p['codigo']} — {p['descricao']}": p for p in prods_encontrados}
+        escolha_prod = st.selectbox("Produto:", list(opcoes_prod.keys()), key="prop_sel_prod")
+        prod_sel = opcoes_prod[escolha_prod]
+
+        col_q, col_v, col_d, col_add = st.columns([2, 2, 2, 1])
+        with col_q:
+            qty = st.number_input("Qtd", min_value=0.0, value=1.0, format="%.2f", key="prop_qty")
+        with col_v:
+            vunit = st.number_input("Vl. Unit (R$)", min_value=0.0,
+                                     value=float(prod_sel.get("valor_unitario", 0)), format="%.2f", key="prop_vunit")
+        with col_d:
+            desc_pct = st.number_input("Desconto %", min_value=0.0, max_value=100.0, value=0.0, format="%.1f", key="prop_desc")
+        with col_add:
+            st.write("")
+            st.write("")
+            if st.button("➕ Adicionar", key="prop_add"):
+                itens = st.session_state.get("prop_itens", [])
+                itens.append({
+                    "codigo_produto": prod_sel["codigo_produto"],
+                    "codigo": prod_sel["codigo"],
+                    "descricao": prod_sel["descricao"],
+                    "unidade": prod_sel.get("unidade", "UN"),
+                    "quantidade": qty,
+                    "valor_unitario": vunit,
+                    "desconto": desc_pct,
+                })
+                st.session_state["prop_itens"] = itens
+                st.rerun()
+
+    # Carrinho
+    itens = st.session_state.get("prop_itens", [])
+    if itens:
+        st.markdown("**Itens da proposta:**")
+        total = 0
+        for i, item in enumerate(itens):
+            subtotal = item["quantidade"] * item["valor_unitario"] * (1 - item["desconto"] / 100)
+            total += subtotal
+            def fmt(v): return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            col_i, col_rm = st.columns([9, 1])
+            with col_i:
+                st.write(f"**{item['descricao']}** | {item['quantidade']} {item['unidade']} × {fmt(item['valor_unitario'])} | Desc: {item['desconto']}% | **{fmt(subtotal)}**")
+            with col_rm:
+                if st.button("🗑", key=f"rm_{i}"):
+                    itens.pop(i)
+                    st.session_state["prop_itens"] = itens
+                    st.rerun()
+
+        def fmt(v): return f"R$ {v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        st.markdown(f"### Total: {fmt(total)}")
+
+    st.divider()
+
+    # ── 3. Condições ──────────────────────────────────────────────────────────
+    st.subheader("3. Condições e Observações")
+    col_cp, col_obs = st.columns(2)
+    with col_cp:
+        cp_key = f"cond_pag_{api.empresa}"
+        if cp_key not in st.session_state:
+            st.session_state[cp_key] = api.listar_condicoes_pagamento()
+        conds = st.session_state[cp_key]
+        if conds:
+            opcoes_cp = {c["descricao"]: c["codigo"] for c in conds}
+            cp_escolha = st.selectbox("Condição de Pagamento:", list(opcoes_cp.keys()), key="prop_cp")
+            cod_cp = opcoes_cp[cp_escolha]
+            desc_cp = cp_escolha
+        else:
+            cod_cp = "999"
+            desc_cp = st.text_input("Condição de Pagamento", key="prop_cp_txt")
+    with col_obs:
+        obs = st.text_area("Observações", height=80, key="prop_obs",
+                            placeholder="Ex: Validade da proposta: 15 dias. Frete por conta do cliente.")
+
+    st.divider()
+
+    # ── 4. Ações ──────────────────────────────────────────────────────────────
+    pode_criar = cliente_sel and itens
+    if not pode_criar:
+        st.info("Adicione cliente e pelo menos um produto para criar a proposta.")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("📋 Criar Pedido no OMIE", type="primary",
+                      disabled=not pode_criar, use_container_width=True):
+            with st.spinner("Criando pedido no OMIE..."):
+                r = api.criar_pedido_proposta(
+                    codigo_cliente=cliente_sel["codigo_cliente_omie"],
+                    itens=itens,
+                    condicao_pagamento=cod_cp,
+                    observacao=obs,
+                )
+            if r.get("codigo_status") == "0" or r.get("numero_pedido"):
+                num_ped = r.get("numero_pedido", "")
+                st.success(f"✅ Pedido criado no OMIE! Número: **{num_ped}**")
+                st.session_state["prop_numero_pedido"] = str(num_ped)
+            else:
+                st.error(f"Erro: {r.get('faultstring', r)}")
+
+    with col_b:
+        if st.button("📄 Baixar PDF da Proposta", disabled=not pode_criar,
+                      use_container_width=True):
+            num_ped = st.session_state.get("prop_numero_pedido", "")
+            pdf_bytes = gerar_proposta_pdf(
+                empresa=api.empresa,
+                cliente_nome=cliente_sel.get("razao_social", "") if cliente_sel else "",
+                itens=itens,
+                condicao_pagamento=desc_cp if pode_criar else "",
+                observacao=obs,
+                numero_pedido=num_ped,
+            )
+            st.download_button(
+                label="⬇️ Clique para baixar",
+                data=pdf_bytes,
+                file_name=f"proposta_{cliente_sel.get('razao_social','')[:20].replace(' ','_')}_{datetime.today().strftime('%d%m%Y')}.pdf",
+                mime="application/pdf",
+                key=f"dl_prop_{int(time.time())}"
+            )
+
+    # Limpar
+    if itens and st.button("🗑 Limpar proposta", use_container_width=True):
+        for k in ["prop_itens", "prop_cliente_sel", "prop_clientes",
+                  "prop_produtos_encontrados", "prop_numero_pedido"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+
 # ── LAYOUT PRINCIPAL ─────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Assistente", page_icon="🏢", layout="centered")
@@ -844,18 +1014,24 @@ st.session_state["_api_atual"] = api
 
 st.divider()
 
-aba = st.tabs(["💬 Consultar", "📥 Lançar Conta a Pagar", "✅ Baixar Pagamento"])
+aba = st.tabs(["💬 Consultar", "📋 Proposta", "📥 Lançar Conta", "✅ Baixar Pagamento"])
 
 with aba[0]:
     pagina_chat(api, consolidado, empresa_sel)
 
 with aba[1]:
     if consolidado:
+        st.info("Selecione uma empresa específica para criar propostas.")
+    else:
+        pagina_proposta(api)
+
+with aba[2]:
+    if consolidado:
         st.info("Selecione uma empresa específica para lançar contas a pagar.")
     else:
         pagina_lancar_conta_pagar(api)
 
-with aba[2]:
+with aba[3]:
     if consolidado:
         st.info("Selecione uma empresa específica para baixar pagamentos.")
     else:

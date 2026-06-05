@@ -192,6 +192,72 @@ class OmieAPI:
                        c.get("numero_documento_fiscal", "").lstrip("0") == str(numero_nf).lstrip("0")]
         return {"boletos": encontradas, "total": len(encontradas)}
 
+    def buscar_produtos(self, nome: str = "", codigo: str = ""):
+        """Busca produtos cadastrados no OMIE."""
+        r = self._call("produtos/produto", "ListarProdutos", {
+            "pagina": 1, "registros_por_pagina": 100, "apenas_importado_api": "N",
+        })
+        produtos = r.get("produto_servico_cadastro", [])
+        resultado = []
+        for p in produtos:
+            desc = p.get("descricao", "")
+            cod = p.get("codigo", "")
+            if nome and nome.lower() not in desc.lower() and nome.lower() not in cod.lower():
+                continue
+            if codigo and codigo.lower() not in cod.lower():
+                continue
+            resultado.append({
+                "codigo_produto": p.get("codigo_produto", 0),
+                "codigo": cod,
+                "descricao": desc,
+                "unidade": p.get("unidade", "UN"),
+                "valor_unitario": p.get("valor_unitario", 0),
+                "estoque_atual": p.get("quantidade_estoque", 0),
+            })
+        return resultado
+
+    def listar_condicoes_pagamento(self):
+        """Lista condições de pagamento cadastradas."""
+        r = self._call("geral/cparcelamento", "ListarCondicoesPagamento", {
+            "pagina": 1, "registros_por_pagina": 50
+        })
+        return [
+            {"codigo": c.get("cCodigo", ""), "descricao": c.get("cDescricao", "")}
+            for c in r.get("cadastros", [])
+        ]
+
+    def criar_pedido_proposta(self, codigo_cliente: int, itens: list,
+                               condicao_pagamento: str = "", observacao: str = "",
+                               codigo_categoria: str = ""):
+        """Cria um pedido de venda como proposta/orçamento no OMIE."""
+        hoje = datetime.today().strftime("%d/%m/%Y")
+        det = []
+        for i, item in enumerate(itens, 1):
+            det.append({
+                "ide": {"nItem": i},
+                "produto": {
+                    "codigo_produto": item["codigo_produto"],
+                    "quantidade": item["quantidade"],
+                    "valor_unitario": item["valor_unitario"],
+                    "percentual_desconto": item.get("desconto", 0),
+                }
+            })
+        payload = {
+            "cabecalho": {
+                "codigo_cliente": codigo_cliente,
+                "data_previsao": hoje,
+                "etapa": "10",  # Etapa inicial = proposta/orçamento
+                "codigo_parcela": condicao_pagamento or "999",
+            },
+            "det": det,
+            "informacoes_adicionais": {
+                "codigo_categoria": codigo_categoria or "1.01.99",
+                "observacoes": observacao,
+                "consumidor_final": "N",
+            }
+        }
+        return self._call("produtos/pedido", "IncluirPedido", payload)
+
     def consultar_estoque(self, nome_produto: str = "", codigo_produto: str = ""):
         """Busca produtos e retorna estoque atual."""
         filtro = {}
