@@ -271,8 +271,26 @@ class OmieAPI:
         }
         return self._call("produtos/pedido", "IncluirPedido", payload)
 
+    def _posicao_estoque(self, codigo_produto_omie: int) -> dict:
+        """Consulta saldo real de estoque de um produto via PosicaoEstoque."""
+        hoje = datetime.today().strftime("%d/%m/%Y")
+        try:
+            r = self._call("estoque/consulta", "PosicaoEstoque", {
+                "nCodProd": codigo_produto_omie,
+                "data": hoje,
+            })
+            locais = r.get("estoque", [])
+            fisico = sum(float(l.get("nQtdFisico", 0)) for l in locais)
+            reservado = sum(float(l.get("nQtdReservado", 0)) for l in locais)
+            disponivel = sum(float(l.get("nQtdDisponivel", 0)) for l in locais)
+            if fisico or disponivel:
+                return {"fisico": fisico, "reservado": reservado, "disponivel": disponivel}
+        except Exception:
+            pass
+        return None
+
     def consultar_estoque(self, nome_produto: str = "", codigo_produto: str = ""):
-        """Busca produtos e retorna estoque atual."""
+        """Busca produtos e retorna estoque real via PosicaoEstoque."""
         termo = nome_produto or codigo_produto
         todos = self._listar_todos_produtos()
         resultado = []
@@ -281,11 +299,25 @@ class OmieAPI:
             cod = p.get("codigo", "")
             if termo and termo.lower() not in desc.lower() and termo.lower() not in cod.lower():
                 continue
+            # Busca saldo real
+            cod_omie = p.get("codigo_produto", 0)
+            posicao = self._posicao_estoque(cod_omie)
+            if posicao:
+                estoque_fisico = posicao["fisico"]
+                estoque_disp = posicao["disponivel"]
+                estoque_res = posicao["reservado"]
+            else:
+                # Fallback para o campo da listagem
+                estoque_fisico = p.get("quantidade_estoque", 0)
+                estoque_disp = estoque_fisico
+                estoque_res = 0
             resultado.append({
                 "codigo": cod,
                 "descricao": desc,
                 "unidade": p.get("unidade", ""),
-                "estoque_atual": p.get("quantidade_estoque", 0),
+                "estoque_fisico": estoque_fisico,
+                "estoque_disponivel": estoque_disp,
+                "estoque_reservado": estoque_res,
                 "estoque_minimo": p.get("estoque_minimo", 0),
                 "_empresa": self.empresa,
             })
