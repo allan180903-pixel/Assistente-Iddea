@@ -275,11 +275,7 @@ class OmieAPI:
         """Consulta saldo real de estoque via PosicaoEstoque."""
         hoje = datetime.today().strftime("%d/%m/%Y")
         try:
-            param = {"data": hoje}
-            if cod_integracao:
-                param["cCodIntegracao"] = cod_integracao
-            else:
-                param["cCodIntegracao"] = str(codigo_produto_omie)
+            param = {"data": hoje, "integr": cod_integracao or str(codigo_produto_omie)}
             r = self._call("estoque/consulta", "PosicaoEstoque", param)
             if r.get("faultstring") or r.get("error"):
                 return None
