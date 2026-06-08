@@ -197,8 +197,9 @@ class OmieAPI:
         todos = []
         pagina = 1
         while True:
-            r = self._call("produtos/produto", "ListarProdutos", {
-                "pagina": pagina, "registros_por_pagina": 500, "apenas_importado_api": "N",
+            r = self._call("geral/produtos", "ListarProdutos", {
+                "pagina": pagina, "registros_por_pagina": 500,
+                "filtrar_apenas_omiepdv": "N",
             })
             lote = r.get("produto_servico_cadastro", [])
             todos.extend(lote)
