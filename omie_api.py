@@ -271,20 +271,33 @@ class OmieAPI:
         }
         return self._call("produtos/pedido", "IncluirPedido", payload)
 
-    def _posicao_estoque(self, codigo_produto_omie: int) -> dict:
-        """Consulta saldo real de estoque de um produto via PosicaoEstoque."""
+    def _posicao_estoque(self, codigo_produto_omie: int, cod_integracao: str = "") -> dict:
+        """Consulta saldo real de estoque via PosicaoEstoque."""
         hoje = datetime.today().strftime("%d/%m/%Y")
         try:
-            r = self._call("estoque/consulta", "PosicaoEstoque", {
-                "nCodProd": codigo_produto_omie,
-                "data": hoje,
-            })
-            locais = r.get("estoque", [])
-            fisico = sum(float(l.get("nQtdFisico", 0)) for l in locais)
-            reservado = sum(float(l.get("nQtdReservado", 0)) for l in locais)
-            disponivel = sum(float(l.get("nQtdDisponivel", 0)) for l in locais)
-            if fisico or disponivel:
+            param = {"data": hoje}
+            if cod_integracao:
+                param["cCodIntegracao"] = cod_integracao
+            else:
+                param["cCodIntegracao"] = str(codigo_produto_omie)
+            r = self._call("estoque/consulta", "PosicaoEstoque", param)
+            if r.get("faultstring") or r.get("error"):
+                return None
+            # A resposta pode ter estrutura variada
+            posicoes = r.get("estoque", r.get("posicoes", r.get("cadastros", [])))
+            if isinstance(posicoes, list) and posicoes:
+                fisico = sum(float(l.get("nQtdFisico", l.get("qtd_fisico", 0))) for l in posicoes)
+                reservado = sum(float(l.get("nQtdReservado", l.get("qtd_reservado", 0))) for l in posicoes)
+                disponivel = sum(float(l.get("nQtdDisponivel", l.get("qtd_disponivel", fisico - reservado))) for l in posicoes)
                 return {"fisico": fisico, "reservado": reservado, "disponivel": disponivel}
+            # Resposta direta (sem lista)
+            fisico = float(r.get("nQtdFisico", r.get("qtd_fisico", 0)))
+            if fisico:
+                return {
+                    "fisico": fisico,
+                    "reservado": float(r.get("nQtdReservado", 0)),
+                    "disponivel": float(r.get("nQtdDisponivel", fisico)),
+                }
         except Exception:
             pass
         return None
@@ -301,7 +314,8 @@ class OmieAPI:
                 continue
             # Busca saldo real
             cod_omie = p.get("codigo_produto", 0)
-            posicao = self._posicao_estoque(cod_omie)
+            cod_integ = p.get("codigo_produto_integracao", "") or p.get("codigo", "")
+            posicao = self._posicao_estoque(cod_omie, cod_integ)
             if posicao:
                 estoque_fisico = posicao["fisico"]
                 estoque_disp = posicao["disponivel"]
